@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Menu, Plus, Search, MoreVertical, Trash2, Edit3, 
   Settings, User, MessageSquare, Bookmark, Moon, Sun, 
-  Send, ChevronLeft, Filter, Loader2, X, Archive
+  Send, ChevronLeft, Filter, Loader2, X, Archive, Copy, Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
@@ -63,6 +63,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [freeModelsOnly, setFreeModelsOnly] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -258,6 +259,18 @@ export default function App() {
 
   const toggleTheme = () => {
     setSettings(prev => ({ ...prev, theme: prev.theme === 'dark' ? 'light' : 'dark' }));
+  };
+
+  const handleCopyMessage = async (messageId: string, content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedMessageId(messageId);
+      window.setTimeout(() => {
+        setCopiedMessageId(current => current === messageId ? null : current);
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to copy message:', err);
+    }
   };
 
   // --- Render Helpers ---
@@ -706,9 +719,27 @@ export default function App() {
                     message.role === 'user' ? "items-end" : "items-start"
                   )}
                 >
-                  <span className="text-[10px] uppercase tracking-[0.2em] text-text-dim">
-                    {message.role === 'user' ? 'User' : (message.role === 'system' ? 'Void System' : 'Void Assistant')}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] uppercase tracking-[0.2em] text-text-dim">
+                      {message.role === 'user' ? 'User' : (message.role === 'system' ? 'Void System' : 'Void Assistant')}
+                    </span>
+                    {message.role === 'assistant' && (
+                      <button
+                        type="button"
+                        onClick={() => handleCopyMessage(message.id, message.content)}
+                        aria-label="Copy assistant response"
+                        title="Copy response"
+                        className={cn(
+                          "inline-flex items-center justify-center rounded-md p-1 transition-colors",
+                          settings.theme === 'dark'
+                            ? "text-text-dim hover:text-text-offwhite hover:bg-white/5"
+                            : "text-text-muted-light hover:text-text-light hover:bg-black/5"
+                        )}
+                      >
+                        {copiedMessageId === message.id ? <Check size={12} /> : <Copy size={12} />}
+                      </button>
+                    )}
+                  </div>
                   
                   <div className={cn(
                     "markdown-body w-full transition-all duration-300",
@@ -722,7 +753,29 @@ export default function App() {
                           message.role === 'system' ? "text-red-900 font-mono italic opacity-80" : (settings.theme === 'dark' ? "text-text-assistant" : "text-[#444444]")
                         )
                   )}>
-                    <Markdown>{message.content}</Markdown>
+                    {message.role === 'user' ? (
+                      <div className="flex flex-col gap-3">
+                        <Markdown>{message.content}</Markdown>
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => handleCopyMessage(message.id, message.content)}
+                            aria-label="Copy user message"
+                            title="Copy message"
+                            className={cn(
+                              "inline-flex items-center justify-center rounded-md p-1 transition-colors",
+                              settings.theme === 'dark'
+                                ? "text-text-dim hover:text-text-offwhite hover:bg-white/5"
+                                : "text-text-muted-light hover:text-text-light hover:bg-black/5"
+                            )}
+                          >
+                            {copiedMessageId === message.id ? <Check size={12} /> : <Copy size={12} />}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <Markdown>{message.content}</Markdown>
+                    )}
                   </div>
                 </motion.div>
               ))}
