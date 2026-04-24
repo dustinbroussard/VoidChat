@@ -1,10 +1,35 @@
 import { OpenRouterModel, ChatMessage } from '../types';
 
+async function parseApiError(response: Response, fallbackMessage: string): Promise<Error> {
+  let data: any = null;
+
+  try {
+    data = await response.json();
+  } catch {
+    try {
+      const text = await response.text();
+      if (text) {
+        return new Error(text);
+      }
+    } catch {
+      // Ignore response parsing failures and fall back to a generic message.
+    }
+  }
+
+  const message =
+    data?.details?.error?.message ||
+    data?.hint ||
+    data?.error ||
+    fallbackMessage;
+
+  return new Error(message);
+}
+
 export const ApiService = {
   async fetchModels(): Promise<OpenRouterModel[]> {
     const response = await fetch('/api/models');
     if (!response.ok) {
-      throw new Error('Failed to fetch models');
+      throw await parseApiError(response, 'Failed to fetch models');
     }
     const data = await response.json();
     return data.data.map((m: any) => ({
@@ -52,7 +77,7 @@ export const ApiService = {
     });
 
     if (!response.ok) {
-      throw new Error('Summarization failed');
+      throw await parseApiError(response, 'Summarization failed');
     }
 
     const data = await response.json();
