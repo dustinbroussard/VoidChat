@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background-amoled: #000000;
+  --color-panel-dark: #111111;
+  --color-panel-darker: #0a0a0a;
+  --color-border-dark: #222222;
+  --color-border-focus: #444444;
+  --color-text-offwhite: #f5f5f5;
+  --color-text-assistant: #d1d1d1;
+  --color-text-muted: #888888;
+  --color-text-dim: #444444;
+  --color-accent-blue: #4a90e2;
+
+  --color-background-light: #ffffff;
+  --color-panel-light: #f9f9f9;
+  --color-border-light: #e0e0e0;
+  --color-text-light: #1a1a1a;
+  --color-text-muted-light: #666666;
+
+  --radius-xl: 1rem;
+  --radius-2xl: 1.5rem;
+  --radius-3xl: 2rem;
+}
+
+@layer base {
+  body {
+    @apply transition-colors duration-300 overflow-hidden font-sans antialiased;
+  }
+
+  body.dark {
+    @apply bg-background-amoled text-text-offwhite;
+  }
+
+  body.light {
+    @apply bg-background-light text-text-light;
+  }
+
+  * {
+    @apply transition-all duration-200 ease-in-out;
+  }
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.markdown-body {
+  @apply text-[15px] leading-relaxed space-y-4;
+}
+
+.markdown-body p {
+  @apply mb-4 last:mb-0;
+}
+
+.markdown-body code {
+  @apply bg-panel-dark px-1.5 py-0.5 rounded text-[12px] font-mono;
+}
+
+body.light .markdown-body code {
+  @apply bg-panel-light;
+}
+
+.markdown-body pre {
+  @apply bg-panel-dark p-6 rounded-xl overflow-x-auto border border-border-dark my-6 shadow-md;
+}
+
+body.light .markdown-body pre {
+  @apply bg-panel-light border-border-light;
+}
+
+.markdown-body ul, .markdown-body ol {
+  @apply pl-6 mb-4;
+}
+
+.markdown-body ul {
+  @apply list-disc;
+}
+
+.markdown-body ol {
+  @apply list-decimal;
+}
+
+.touch-target {
+  @apply min-h-[44px] min-w-[44px] flex items-center justify-center;
+}

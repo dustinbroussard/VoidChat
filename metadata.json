@@ -1,0 +1,6 @@
+{
+  "name": "Void Chat",
+  "description": "A minimalist AMOLED chatbot powered by OpenRouter.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
