@@ -27,7 +27,7 @@ async function startServer() {
         headers: {
           "Authorization": `Bearer ${apiKey}`,
           "HTTP-Referer": process.env.APP_URL || "http://localhost:3000",
-          "X-Title": "VOID CHAT",
+          "X-Title": "Void Chat",
         },
       });
 
@@ -67,7 +67,7 @@ async function startServer() {
           "Authorization": `Bearer ${apiKey}`,
           "Content-Type": "application/json",
           "HTTP-Referer": process.env.APP_URL || "http://localhost:3000",
-          "X-Title": "VOID CHAT",
+          "X-Title": "Void Chat",
         },
         body: JSON.stringify({
           model,

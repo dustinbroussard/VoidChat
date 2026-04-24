@@ -1,5 +1,5 @@
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
-const DEFAULT_APP_TITLE = "VOID CHAT";
+const DEFAULT_APP_TITLE = "Void Chat";
 
 function getHeader(header) {
   return Array.isArray(header) ? header[0] : header;

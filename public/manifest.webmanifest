@@ -1,6 +1,6 @@
 {
-  "name": "VOID CHAT",
-  "short_name": "VOID",
+  "name": "Void Chat",
+  "short_name": "Void",
   "description": "Minimalist AMOLED chat app with installable offline support.",
   "start_url": "/",
   "display": "standalone",
