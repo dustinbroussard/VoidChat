@@ -1,4 +1,4 @@
-import { proxyOpenRouter } from "./_lib/openrouter.ts";
+import { proxyOpenRouter } from "./_lib/openrouter.js";
 
 export default async function handler(req: any, res: any) {
   if (req.method !== "GET") {

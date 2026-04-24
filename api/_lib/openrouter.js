@@ -1,13 +1,11 @@
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const DEFAULT_APP_TITLE = "VOID CHAT";
 
-type HeaderValue = string | string[] | undefined;
-
-function getHeader(header: HeaderValue): string | undefined {
+function getHeader(header) {
   return Array.isArray(header) ? header[0] : header;
 }
 
-export function getAppUrl(req: { headers?: Record<string, HeaderValue> }): string {
+export function getAppUrl(req) {
   const host = getHeader(req.headers?.host);
   const forwardedProto = getHeader(req.headers?.["x-forwarded-proto"]);
 
@@ -18,7 +16,7 @@ export function getAppUrl(req: { headers?: Record<string, HeaderValue> }): strin
   return process.env.APP_URL || "http://localhost:3000";
 }
 
-export function getOpenRouterHeaders(appUrl: string): Record<string, string> {
+export function getOpenRouterHeaders(appUrl) {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) {
@@ -32,11 +30,7 @@ export function getOpenRouterHeaders(appUrl: string): Record<string, string> {
   };
 }
 
-export async function proxyOpenRouter(
-  req: { headers?: Record<string, HeaderValue> },
-  path: string,
-  init?: RequestInit,
-) {
+export async function proxyOpenRouter(req, path, init) {
   const appUrl = getAppUrl(req);
   const headers = {
     ...getOpenRouterHeaders(appUrl),
@@ -49,7 +43,7 @@ export async function proxyOpenRouter(
   });
 
   const text = await response.text();
-  let data: unknown = null;
+  let data = null;
 
   if (text) {
     try {
