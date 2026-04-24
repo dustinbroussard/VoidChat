@@ -43,3 +43,11 @@ export interface AppSettings {
   selectedModelId: string;
   activePersonaId: string;
 }
+
+export interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{
+    outcome: 'accepted' | 'dismissed';
+    platform: string;
+  }>;
+}

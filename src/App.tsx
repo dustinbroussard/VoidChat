@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Menu, Plus, Search, MoreVertical, Trash2, Edit3, 
   Settings, User, MessageSquare, Bookmark, Moon, Sun, 
-  Send, ChevronLeft, Filter, Loader2, X, Archive, Copy, Check
+  Send, ChevronLeft, Filter, Loader2, X, Archive, Copy, Check, Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
@@ -12,10 +12,19 @@ import { twMerge } from 'tailwind-merge';
 
 import { 
   ChatMessage, Conversation, Persona, 
-  OpenRouterModel, AppSettings, PersonaMemory 
+  OpenRouterModel, AppSettings, PersonaMemory, BeforeInstallPromptEvent
 } from './types';
 import { StorageService } from './lib/storage';
 import { ApiService } from './lib/api';
+
+const INSTALL_PROMPT_SESSION_KEY = 'void_chat_install_prompt_session_state';
+const INSTALL_PROMPT_POLICY = {
+  dismissalScope: 'session',
+};
+
+function isRunningStandalone() {
+  return window.matchMedia('(display-mode: standalone)').matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+}
 
 // Utility for tailwind classes
 function cn(...inputs: ClassValue[]) {
@@ -64,6 +73,10 @@ export default function App() {
   const [freeModelsOnly, setFreeModelsOnly] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isInstallBannerVisible, setIsInstallBannerVisible] = useState(false);
+  const [isInstalled, setIsInstalled] = useState(false);
+  const [isInstallPromptPending, setIsInstallPromptPending] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -103,6 +116,59 @@ export default function App() {
     document.body.className = settings.theme;
     StorageService.saveSettings(settings);
   }, [settings]);
+
+  useEffect(() => {
+    setIsInstalled(isRunningStandalone());
+  }, []);
+
+  useEffect(() => {
+    const sessionChoice = sessionStorage.getItem(INSTALL_PROMPT_SESSION_KEY);
+    const isStandaloneMediaQuery = window.matchMedia('(display-mode: standalone)');
+
+    const handleStandaloneChange = (event: MediaQueryListEvent) => {
+      if (event.matches) {
+        setIsInstalled(true);
+        setIsInstallBannerVisible(false);
+        setDeferredInstallPrompt(null);
+      }
+    };
+
+    const handleBeforeInstallPrompt = (event: Event) => {
+      const installEvent = event as BeforeInstallPromptEvent;
+      installEvent.preventDefault();
+
+      if (isRunningStandalone()) {
+        setIsInstalled(true);
+        setIsInstallBannerVisible(false);
+        return;
+      }
+
+      setDeferredInstallPrompt(installEvent);
+      setIsInstallBannerVisible(sessionChoice == null);
+    };
+
+    const handleAppInstalled = () => {
+      sessionStorage.setItem(INSTALL_PROMPT_SESSION_KEY, 'accepted');
+      setIsInstalled(true);
+      setDeferredInstallPrompt(null);
+      setIsInstallBannerVisible(false);
+      setIsInstallPromptPending(false);
+    };
+
+    isStandaloneMediaQuery.addEventListener('change', handleStandaloneChange);
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    if (sessionChoice != null || isRunningStandalone()) {
+      setIsInstallBannerVisible(false);
+    }
+
+    return () => {
+      isStandaloneMediaQuery.removeEventListener('change', handleStandaloneChange);
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
 
   // --- Derived State ---
   const activeConversation = conversations.find(c => c.id === activeConversationId);
@@ -259,6 +325,38 @@ export default function App() {
 
   const toggleTheme = () => {
     setSettings(prev => ({ ...prev, theme: prev.theme === 'dark' ? 'light' : 'dark' }));
+  };
+
+  const dismissInstallBanner = () => {
+    sessionStorage.setItem(INSTALL_PROMPT_SESSION_KEY, 'declined');
+    setIsInstallBannerVisible(false);
+  };
+
+  const handleInstallApp = async () => {
+    if (!deferredInstallPrompt) return;
+
+    setIsInstallPromptPending(true);
+
+    try {
+      await deferredInstallPrompt.prompt();
+      const choice = await deferredInstallPrompt.userChoice;
+
+      sessionStorage.setItem(
+        INSTALL_PROMPT_SESSION_KEY,
+        choice.outcome === 'accepted' ? 'accepted' : 'declined',
+      );
+
+      setIsInstallBannerVisible(false);
+      setDeferredInstallPrompt(null);
+
+      if (choice.outcome === 'accepted') {
+        setIsInstalled(true);
+      }
+    } catch (error) {
+      console.error('Install prompt failed:', error);
+    } finally {
+      setIsInstallPromptPending(false);
+    }
   };
 
   const handleCopyMessage = async (messageId: string, content: string) => {
@@ -636,6 +734,74 @@ export default function App() {
     </AnimatePresence>
   );
 
+  const renderInstallBanner = () => {
+    if (!deferredInstallPrompt || !isInstallBannerVisible || isInstalled) {
+      return null;
+    }
+
+    return (
+      <div className="max-w-3xl mx-auto px-6 pt-4 md:px-8 md:pt-6">
+        <div className={cn(
+          "rounded-2xl border px-5 py-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between shadow-lg",
+          settings.theme === 'dark'
+            ? "border-border-dark bg-panel-darker/95"
+            : "border-border-light bg-white/95"
+        )}>
+          <div className="flex items-start gap-4">
+            <div className={cn(
+              "mt-0.5 rounded-xl p-2",
+              settings.theme === 'dark' ? "bg-white/5 text-text-offwhite" : "bg-black/5 text-text-light"
+            )}>
+              <Download size={18} />
+            </div>
+            <div className="space-y-1">
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-text-dim">
+                Install VOID CHAT
+              </p>
+              <p className={cn(
+                "text-sm leading-relaxed",
+                settings.theme === 'dark' ? "text-text-assistant" : "text-text-muted-light"
+              )}>
+                Install the app for a standalone experience, quicker relaunches, and cached offline access.
+              </p>
+              <p className="text-[10px] uppercase tracking-wider text-text-dim">
+                Prompt policy: {INSTALL_PROMPT_POLICY.dismissalScope}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              type="button"
+              onClick={dismissInstallBanner}
+              className={cn(
+                "px-4 py-2 min-h-0 text-xs font-semibold uppercase tracking-wider",
+                settings.theme === 'dark'
+                  ? "text-text-muted hover:text-text-offwhite"
+                  : "text-text-muted-light hover:text-text-light"
+              )}
+            >
+              Not Now
+            </Button>
+            <Button
+              type="button"
+              onClick={handleInstallApp}
+              disabled={isInstallPromptPending}
+              className={cn(
+                "px-4 py-2 min-h-0 rounded-full text-xs font-semibold uppercase tracking-wider",
+                settings.theme === 'dark'
+                  ? "bg-white text-black hover:bg-white/90"
+                  : "bg-black text-white hover:bg-black/90"
+              )}
+            >
+              {isInstallPromptPending ? 'Opening...' : 'Install App'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex h-screen overflow-hidden font-sans">
       <AnimatePresence>
@@ -698,6 +864,8 @@ export default function App() {
             />
           </div>
         </header>
+
+        {renderInstallBanner()}
 
         {/* Chat Area */}
         <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-10 scrollbar-hide">
