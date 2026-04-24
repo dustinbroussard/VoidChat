@@ -1,4 +1,4 @@
-import { proxyOpenRouter } from "./_lib/openrouter";
+import { proxyOpenRouter } from "./_lib/openrouter.ts";
 
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {
