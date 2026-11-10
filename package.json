@@ -14,6 +14,7 @@
   "dependencies": {
     "@google/genai": "^1.29.0",
     "@tailwindcss/vite": "^4.1.14",
+    "@types/prismjs": "^1.26.6",
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^5.0.4",
     "clsx": "^2.1.1",
@@ -21,9 +22,11 @@
     "express": "^4.21.2",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "prismjs": "^1.30.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.5.0",
     "uuid": "^14.0.0",
     "vite": "^6.2.0"

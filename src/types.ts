@@ -3,6 +3,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
+  isError?: boolean;
 }
 
 export interface Conversation {
@@ -12,6 +13,7 @@ export interface Conversation {
   lastUpdated: number;
   personaId: string;
   modelId: string;
+  isPinned?: boolean;
 }
 
 export interface Persona {

@@ -155,8 +155,13 @@ export const ApiService = {
     model: string,
     messages: ChatMessage[],
     temperature: number = 0.7,
-    ollamaHost?: string
+    ollamaHost?: string,
+    signal?: AbortSignal
   ): Promise<string> {
+    if (signal?.aborted) {
+      throw new DOMException('Generation stopped by user', 'AbortError');
+    }
+
     const targetHost = normalizeOllamaHost(ollamaHost);
 
     // If this is an Ollama model, attempt direct local call first, then server proxy
@@ -164,11 +169,12 @@ export const ApiService = {
       const rawModel = model.replace(/^ollama\//, '');
       const formattedMessages = messages.map(m => ({ role: m.role, content: m.content }));
 
-      // 1. Direct browser fetch to Ollama
+      // 1. Direct browser fetch to Ollama (if accessible directly)
       try {
         const res = await fetch(`${targetHost}/api/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal,
           body: JSON.stringify({
             model: rawModel,
             messages: formattedMessages,
@@ -183,25 +189,54 @@ export const ApiService = {
             return data.message.content;
           }
         }
-      } catch {
-        // Direct call failed, fall back to server proxy
+      } catch (err: any) {
+        if (err?.name === 'AbortError' || signal?.aborted) {
+          throw new DOMException('Generation stopped by user', 'AbortError');
+        }
+        // Direct call failed (CORS/offline/mixed-content), fall back to server proxy
+      }
+
+      if (signal?.aborted) {
+        throw new DOMException('Generation stopped by user', 'AbortError');
       }
 
       // 2. Server proxy fallback
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          messages: formattedMessages,
-          temperature,
-          ollamaHost: targetHost,
-        }),
-      });
+      let response: Response;
+      try {
+        response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal,
+          body: JSON.stringify({
+            model,
+            messages: formattedMessages,
+            temperature,
+            ollamaHost: targetHost,
+          }),
+        });
+      } catch (fetchErr: any) {
+        if (fetchErr?.name === 'AbortError' || signal?.aborted) {
+          throw new DOMException('Generation stopped by user', 'AbortError');
+        }
+        throw new Error(`Could not connect to Ollama service at ${targetHost}. Ensure Ollama is running ('ollama serve').`);
+      }
 
-      const data = await response.json();
+      let data: any = null;
+      try {
+        data = await response.json();
+      } catch {
+        // Non-JSON response
+      }
+
       if (!response.ok) {
-        throw new Error(data?.error || data?.details || 'Ollama request failed');
+        if (response.status === 404) {
+          throw new Error(`Ollama model "${rawModel}" was not found. Run 'ollama run ${rawModel}' first.`);
+        }
+        if (response.status === 504 || response.status === 408) {
+          throw new Error('Ollama request timed out. The model may be loading or under heavy load.');
+        }
+        const errDetail = data?.error || data?.details || 'Ollama generation failed';
+        throw new Error(String(errDetail));
       }
 
       if (data?.choices?.[0]?.message?.content) {
@@ -210,29 +245,55 @@ export const ApiService = {
       if (data?.message?.content) {
         return data.message.content;
       }
-      throw new Error('Invalid response from Ollama model');
+      throw new Error('Invalid response received from local Ollama model');
     }
 
     // Standard OpenRouter / Gemini flow
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages: messages.map(m => ({ role: m.role, content: m.content })),
-        temperature,
-      }),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      const message = data.details?.error?.message || data.error || 'Chat completion failed';
-      throw new Error(message);
+    let response: Response;
+    try {
+      response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal,
+        body: JSON.stringify({
+          model,
+          messages: messages.map(m => ({ role: m.role, content: m.content })),
+          temperature,
+        }),
+      });
+    } catch (err: any) {
+      if (err?.name === 'AbortError' || signal?.aborted) {
+        throw new DOMException('Generation stopped by user', 'AbortError');
+      }
+      throw new Error('Network connection error. Please verify your internet connection.');
     }
 
-    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-      throw new Error('Invalid response from AI model');
+    let data: any = null;
+    try {
+      data = await response.json();
+    } catch {
+      // Non-JSON response
+    }
+
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        throw new Error('Authentication failure. Please check your API key configuration.');
+      }
+      if (response.status === 429) {
+        throw new Error('Rate limit reached. Please wait a brief moment before retrying.');
+      }
+      if (response.status === 503 || response.status === 502) {
+        throw new Error('The selected model is temporarily overloaded or unavailable. Please retry or try another model.');
+      }
+      if (response.status === 504) {
+        throw new Error('The request timed out waiting for the model. Please retry.');
+      }
+      const message = data?.details?.error?.message || data?.error || 'Chat completion request failed';
+      throw new Error(String(message));
+    }
+
+    if (!data?.choices || !data.choices[0] || !data.choices[0].message) {
+      throw new Error('Invalid response received from AI model');
     }
 
     return data.choices[0].message.content;

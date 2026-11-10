@@ -2,45 +2,52 @@
 
 @theme {
   --color-background-amoled: #000000;
-  --color-panel-dark: #111111;
-  --color-panel-darker: #0a0a0a;
-  --color-border-dark: #222222;
-  --color-border-focus: #444444;
-  --color-text-offwhite: #f5f5f5;
-  --color-text-assistant: #d1d1d1;
-  --color-text-muted: #888888;
-  --color-text-dim: #444444;
+  --color-panel-dark: #0d0d10;
+  --color-panel-darker: #070709;
+  --color-panel-card: #121216;
+  --color-border-dark: rgba(255, 255, 255, 0.08);
+  --color-border-focus: rgba(255, 255, 255, 0.18);
+  --color-text-offwhite: #f5f5f7;
+  --color-text-assistant: #d4d4dc;
+  --color-text-muted: #8e8e99;
+  --color-text-dim: #545460;
   --color-accent-blue: #4a90e2;
 
-  --color-background-light: #ffffff;
-  --color-panel-light: #f9f9f9;
-  --color-border-light: #e0e0e0;
-  --color-text-light: #1a1a1a;
-  --color-text-muted-light: #666666;
+  --color-background-light: #fafafa;
+  --color-panel-light: #f2f2f5;
+  --color-panel-light-card: #ffffff;
+  --color-border-light: rgba(0, 0, 0, 0.08);
+  --color-border-light-focus: rgba(0, 0, 0, 0.2);
+  --color-text-light: #18181b;
+  --color-text-muted-light: #646470;
 
-  --radius-xl: 1rem;
-  --radius-2xl: 1.5rem;
-  --radius-3xl: 2rem;
+  --radius-xl: 0.875rem;
+  --radius-2xl: 1.25rem;
+  --radius-3xl: 1.75rem;
 }
 
 @layer base {
   body {
-    @apply transition-colors duration-300 overflow-hidden font-sans antialiased;
+    @apply transition-colors duration-200 overflow-hidden font-sans antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
   body.dark {
     @apply bg-background-amoled text-text-offwhite;
+    color-scheme: dark;
   }
 
   body.light {
     @apply bg-background-light text-text-light;
+    color-scheme: light;
   }
 
-  * {
-    @apply transition-all duration-200 ease-in-out;
+  button, input, textarea, select {
+    @apply transition-colors duration-150 ease-out;
   }
 }
 
+/* Custom scrollbars */
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
@@ -50,42 +57,108 @@
   scrollbar-width: none;
 }
 
-.markdown-body {
-  @apply text-[15px] leading-relaxed space-y-4;
+.scrollbar-thin::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
 }
 
-.markdown-body p {
-  @apply mb-4 last:mb-0;
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
 }
 
-.markdown-body code {
-  @apply bg-panel-dark px-1.5 py-0.5 rounded text-[12px] font-mono;
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
 }
 
-body.light .markdown-body code {
-  @apply bg-panel-light;
+body.light .scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
 }
 
-.markdown-body pre {
-  @apply bg-panel-dark p-6 rounded-xl overflow-x-auto border border-border-dark my-6 shadow-md;
+/* Prism Token Highlighting (AMOLED dark & Clean light) */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: #6b7280;
+  font-style: italic;
 }
 
-body.light .markdown-body pre {
-  @apply bg-panel-light border-border-light;
+.token.punctuation {
+  color: #94a3b8;
 }
 
-.markdown-body ul, .markdown-body ol {
-  @apply pl-6 mb-4;
+.token.property,
+.token.tag,
+.token.boolean,
+.token.number,
+.token.constant,
+.token.symbol {
+  color: #f87171;
 }
 
-.markdown-body ul {
-  @apply list-disc;
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin {
+  color: #34d399;
 }
 
-.markdown-body ol {
-  @apply list-decimal;
+.token.operator,
+.token.entity,
+.token.url {
+  color: #60a5fa;
 }
 
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+  color: #c084fc;
+}
+
+.token.function,
+.token.class-name {
+  color: #38bdf8;
+}
+
+.token.regex,
+.token.important,
+.token.variable {
+  color: #fbbf24;
+}
+
+/* Light mode syntax tokens */
+body.light .token.comment {
+  color: #9ca3af;
+}
+
+body.light .token.property,
+body.light .token.number {
+  color: #dc2626;
+}
+
+body.light .token.string {
+  color: #059669;
+}
+
+body.light .token.operator {
+  color: #2563eb;
+}
+
+body.light .token.keyword {
+  color: #7c3aed;
+}
+
+body.light .token.function {
+  color: #0284c7;
+}
+
+body.light .token.punctuation {
+  color: #64748b;
+}
+
+/* Touch targets */
 .touch-target {
-  @apply min-h-[44px] min-w-[44px] flex items-center justify-center;
+  @apply min-h-[36px] min-w-[36px] flex items-center justify-center;
 }

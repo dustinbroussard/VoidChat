@@ -1,6 +1,6 @@
 {
-  "name": "Void Chat",
-  "description": "A minimalist AMOLED chat app with local Ollama support, OpenRouter models, auto-saved chat history, and JSON import/export.",
+  "name": "VoidChatRemix",
+  "description": "Imported from GitHub",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
