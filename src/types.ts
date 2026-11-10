@@ -36,12 +36,15 @@ export interface OpenRouterModel {
     completion: string;
   };
   context_length: number;
+  source?: 'openrouter' | 'gemini' | 'ollama';
 }
 
 export interface AppSettings {
   theme: 'dark' | 'light';
   selectedModelId: string;
   activePersonaId: string;
+  ollamaHost?: string;
+  autoScroll?: boolean;
 }
 
 export interface BeforeInstallPromptEvent extends Event {
