@@ -3,7 +3,9 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
-// Set default dark theme on body
+// Set default AMOLED dark theme
+document.documentElement.setAttribute('data-theme', 'default-dark');
+document.body.setAttribute('data-theme', 'default-dark');
 document.body.classList.add('dark');
 
 // Register service worker

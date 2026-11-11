@@ -66,26 +66,27 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, code }) => {
   const highlightedHtml = getHighlightedHtml();
 
   return (
-    <div className="my-4 rounded-xl border border-white/[0.08] dark:border-white/[0.08] light:border-black/[0.08] bg-[#0c0c0e] dark:bg-[#0c0c0e] light:bg-[#f6f6f8] overflow-hidden text-xs md:text-sm font-mono shadow-sm group">
+    <div className="my-4 rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] overflow-hidden text-xs md:text-sm font-mono elevation-low group transition-all duration-200">
       {/* Code Header Bar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-white/[0.06] dark:border-white/[0.06] light:border-black/[0.06] bg-white/[0.02] dark:bg-white/[0.02] light:bg-black/[0.02]">
-        <span className="text-[11px] font-semibold tracking-wider text-text-dim uppercase font-mono">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--border-light)] bg-[var(--bg-tertiary)]">
+        <span className="text-[11px] font-semibold tracking-wider text-[var(--text-muted)] uppercase font-mono">
           {displayLang}
         </span>
         <button
           type="button"
           onClick={handleCopy}
-          className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-sans font-medium text-text-dim hover:text-text-offwhite dark:hover:text-white light:hover:text-zinc-900 hover:bg-white/5 dark:hover:bg-white/5 light:hover:bg-black/5 transition-colors cursor-pointer"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-sans font-medium text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] active:scale-[0.97] transition-all cursor-pointer focus-visible:ring-1 focus-visible:ring-[var(--accent-primary)]"
           title="Copy code to clipboard"
+          aria-label="Copy code to clipboard"
         >
           {copied ? (
             <>
-              <Check size={12} className="text-emerald-400" />
-              <span className="text-emerald-400">Copied</span>
+              <Check size={13} className="text-[var(--success)]" />
+              <span className="text-[var(--success)]">Copied</span>
             </>
           ) : (
             <>
-              <Copy size={12} />
+              <Copy size={13} />
               <span>Copy</span>
             </>
           )}
@@ -93,16 +94,16 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language, code }) => {
       </div>
 
       {/* Code Content Container */}
-      <div className="overflow-x-auto p-4 max-h-[500px] overflow-y-auto scrollbar-thin">
+      <div className="overflow-x-auto p-4 max-h-[500px] overflow-y-auto scrollbar-thin bg-[var(--bg-card)]">
         {highlightedHtml ? (
-          <pre className="!bg-transparent !p-0 !m-0 !border-0 font-mono text-[13px] leading-relaxed text-text-assistant dark:text-zinc-200 light:text-zinc-800">
+          <pre className="!bg-transparent !p-0 !m-0 !border-0 font-mono text-[13px] leading-relaxed text-[var(--text-secondary)]">
             <code
               className={`language-${cleanLang} !bg-transparent !p-0`}
               dangerouslySetInnerHTML={{ __html: highlightedHtml }}
             />
           </pre>
         ) : (
-          <pre className="!bg-transparent !p-0 !m-0 !border-0 font-mono text-[13px] leading-relaxed text-text-assistant dark:text-zinc-200 light:text-zinc-800">
+          <pre className="!bg-transparent !p-0 !m-0 !border-0 font-mono text-[13px] leading-relaxed text-[var(--text-secondary)]">
             <code className="!bg-transparent !p-0">{code}</code>
           </pre>
         )}
@@ -118,7 +119,7 @@ interface MarkdownRendererProps {
 
 export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isUser = false }) => {
   return (
-    <div className={isUser ? "user-markdown" : "assistant-markdown"}>
+    <div className={isUser ? "user-markdown leading-relaxed" : "assistant-markdown leading-relaxed"}>
       <Markdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -132,10 +133,10 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isU
               return <CodeBlock language={match ? match[1] : ''} code={rawCode} />;
             }
 
-            // Inline code
+            // Inline code with consistent padding, rounded-lg and border tokens
             return (
               <code
-                className="font-mono text-[13px] px-1.5 py-0.5 rounded bg-white/[0.08] dark:bg-white/[0.08] light:bg-black/[0.06] text-white/95 dark:text-zinc-100 light:text-zinc-900 border border-white/[0.06] dark:border-white/[0.06] light:border-black/[0.06]"
+                className="font-mono text-[13px] px-1.5 py-0.5 rounded-lg bg-[var(--bg-secondary)] text-[var(--text-accent)] border border-[var(--border-light)] font-medium"
                 {...props}
               >
                 {children}
@@ -143,12 +144,12 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isU
             );
           },
           pre({ children }) {
-            // Passthrough so CodeBlock handles styling and avoiding double wrapper
+            // Passthrough so CodeBlock handles styling avoiding double wrappers
             return <>{children}</>;
           },
           table({ children }) {
             return (
-              <div className="my-5 w-full overflow-x-auto rounded-xl border border-white/[0.08] dark:border-white/[0.08] light:border-black/[0.08] bg-[#0c0c0e]/50 dark:bg-[#0c0c0e]/50 light:bg-[#f8f8fa]">
+              <div className="my-5 w-full overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] elevation-low">
                 <table className="w-full text-left border-collapse text-xs md:text-sm">
                   {children}
                 </table>
@@ -157,84 +158,84 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isU
           },
           thead({ children }) {
             return (
-              <thead className="bg-white/[0.03] dark:bg-white/[0.03] light:bg-black/[0.03] border-b border-white/[0.08] dark:border-white/[0.08] light:border-black/[0.08]">
+              <thead className="bg-[var(--bg-tertiary)] border-b border-[var(--border)]">
                 {children}
               </thead>
             );
           },
           th({ children }) {
             return (
-              <th className="px-4 py-2.5 font-semibold text-[11px] tracking-wider uppercase text-text-dim">
+              <th className="px-4 py-2.5 font-semibold text-[11px] tracking-wider uppercase text-[var(--text-muted)] font-mono">
                 {children}
               </th>
             );
           },
           td({ children }) {
             return (
-              <td className="px-4 py-2.5 border-b border-white/[0.04] dark:border-white/[0.04] light:border-black/[0.04] text-text-assistant dark:text-zinc-300 light:text-zinc-700 last:border-b-0 leading-normal">
+              <td className="px-4 py-2.5 border-b border-[var(--border-light)] text-[var(--text-secondary)] last:border-b-0 leading-normal">
                 {children}
               </td>
             );
           },
           h1({ children }) {
             return (
-              <h1 className="text-xl md:text-2xl font-semibold tracking-tight text-text-offwhite dark:text-white light:text-zinc-900 mt-6 mb-3 first:mt-0">
+              <h1 className="text-xl md:text-2xl font-semibold tracking-tight text-[var(--text-primary)] mt-6 mb-3 first:mt-0">
                 {children}
               </h1>
             );
           },
           h2({ children }) {
             return (
-              <h2 className="text-lg md:text-xl font-semibold tracking-tight text-text-offwhite dark:text-white light:text-zinc-900 mt-5 mb-2.5 first:mt-0">
+              <h2 className="text-lg md:text-xl font-semibold tracking-tight text-[var(--text-primary)] mt-5 mb-2.5 first:mt-0">
                 {children}
               </h2>
             );
           },
           h3({ children }) {
             return (
-              <h3 className="text-base font-semibold text-text-offwhite dark:text-white light:text-zinc-900 mt-4 mb-2 first:mt-0">
+              <h3 className="text-base font-semibold text-[var(--text-primary)] mt-4 mb-2 first:mt-0">
                 {children}
               </h3>
             );
           },
           h4({ children }) {
             return (
-              <h4 className="text-sm font-semibold text-text-offwhite dark:text-white light:text-zinc-900 mt-3 mb-1.5 first:mt-0">
+              <h4 className="text-sm font-semibold text-[var(--text-primary)] mt-3 mb-1.5 first:mt-0">
                 {children}
               </h4>
             );
           },
           p({ children }) {
             return (
-              <p className="mb-4 last:mb-0 leading-[1.75] text-text-assistant dark:text-zinc-300 light:text-zinc-700">
+              <p className="mb-4 last:mb-0 leading-[1.75] text-[var(--text-secondary)]">
                 {children}
               </p>
             );
           },
           ul({ children }) {
             return (
-              <ul className="list-disc pl-5 my-3 space-y-1.5 marker:text-text-dim/80">
+              <ul className="list-disc pl-5 my-3 space-y-1.5 marker:text-[var(--text-muted)] text-[var(--text-secondary)]">
                 {children}
               </ul>
             );
           },
           ol({ children }) {
             return (
-              <ol className="list-decimal pl-5 my-3 space-y-1.5 marker:text-text-dim/80">
+              <ol className="list-decimal pl-5 my-3 space-y-1.5 marker:text-[var(--text-muted)] text-[var(--text-secondary)]">
                 {children}
               </ol>
             );
           },
           li({ children }) {
             return (
-              <li className="leading-relaxed pl-1 text-text-assistant dark:text-zinc-300 light:text-zinc-700">
+              <li className="leading-relaxed pl-1 text-[var(--text-secondary)]">
                 {children}
               </li>
             );
           },
           blockquote({ children }) {
             return (
-              <blockquote className="border-l-2 border-accent-blue/40 dark:border-accent-blue/40 light:border-accent-blue/50 pl-4 py-1 my-4 text-text-muted dark:text-zinc-400 light:text-zinc-600 italic bg-white/[0.01] rounded-r-lg">
+              <blockquote className="border border-[var(--border-light)] bg-[var(--bg-secondary)] rounded-xl p-3.5 my-4 text-[var(--text-secondary)] italic">
                 {children}
               </blockquote>
             );
@@ -245,7 +246,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isU
                 href={href}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-accent-blue hover:underline underline-offset-4 decoration-accent-blue/40 hover:decoration-accent-blue transition-colors font-medium break-words"
+                className="text-[var(--text-primary)] hover:text-[var(--text-accent)] underline underline-offset-4 decoration-[var(--border)] hover:decoration-[var(--accent-primary)] transition-colors font-medium break-words"
               >
                 {children}
               </a>
@@ -253,7 +254,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isU
           },
           hr() {
             return (
-              <hr className="my-6 border-t border-white/[0.08] dark:border-white/[0.08] light:border-black/[0.08]" />
+              <hr className="my-6 border-t border-[var(--border-light)]" />
             );
           },
         }}
