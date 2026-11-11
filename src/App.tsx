@@ -96,7 +96,8 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
   const [isPersonaManagerOpen, setIsPersonaManagerOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [generatingConvoIds, setGeneratingConvoIds] = useState<Set<string>>(new Set());
+  const [isSummarizingMemory, setIsSummarizingMemory] = useState(false);
   const [inputMessage, setInputMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [freeModelsOnly, setFreeModelsOnly] = useState(false);
@@ -115,9 +116,10 @@ export default function App() {
   const [editingUserMessageId, setEditingUserMessageId] = useState<string | null>(null);
   const [editingUserMessageContent, setEditingUserMessageContent] = useState('');
 
-  // --- Active Request & Abort Controller ---
-  const activeAbortControllerRef = useRef<AbortController | null>(null);
-  const activeGeneratingConvoIdRef = useRef<string | null>(null);
+  // --- Per-Conversation Abort Controllers & Streaming State ---
+  const activeControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const isGeneratingActiveConvo = activeConversationId ? generatingConvoIds.has(activeConversationId) : false;
+  const isLoading = isGeneratingActiveConvo;
 
   // --- Conversation Context Menu State ---
   const [activeMenuConvoId, setActiveMenuConvoId] = useState<string | null>(null);
@@ -518,68 +520,116 @@ Type your query in the composer below or click the microphone to dictate.`,
     };
   }, []);
 
-  // --- Stop Active Request ---
-  const handleStopGeneration = () => {
-    if (activeAbortControllerRef.current) {
-      activeAbortControllerRef.current.abort();
-      activeAbortControllerRef.current = null;
+  // --- Stop Generation (Per-Conversation or Active) ---
+  const handleStopGeneration = (convoId?: string) => {
+    const targetId = convoId || activeConversationId;
+    if (targetId && activeControllersRef.current.has(targetId)) {
+      const controller = activeControllersRef.current.get(targetId);
+      controller?.abort();
+      activeControllersRef.current.delete(targetId);
     }
-    activeGeneratingConvoIdRef.current = null;
-    setIsLoading(false);
+    setGeneratingConvoIds(prev => {
+      const next = new Set(prev);
+      if (targetId) next.delete(targetId);
+      return next;
+    });
     showToast('Generation stopped');
   };
 
-  // --- Central Execution Engine ---
+  // --- Central Execution Engine with True SSE Incremental Streaming ---
   const executeGeneration = async (
     targetConvoId: string,
     messagesContext: ChatMessage[]
   ) => {
-    if (isLoading && activeGeneratingConvoIdRef.current === targetConvoId) {
-      showToast('A generation is already in progress');
+    if (activeControllersRef.current.has(targetConvoId)) {
+      showToast('A generation is already in progress for this conversation');
       return;
     }
 
     const controller = new AbortController();
-    activeAbortControllerRef.current = controller;
-    activeGeneratingConvoIdRef.current = targetConvoId;
-    setIsLoading(true);
+    activeControllersRef.current.set(targetConvoId, controller);
+    setGeneratingConvoIds(prev => new Set(prev).add(targetConvoId));
+
     userScrolledUpRef.current = false;
     setIsUserScrolledUp(false);
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 40);
 
-    try {
-      const systemMessageContent = `System prompt:\n${activePersona?.systemPrompt || ''}${activePersona?.memories && activePersona.memories.length > 0 ? '\n\nRelevant saved memories for this persona:\n' + activePersona.memories.map(m => `- ${m.content}`).join('\n') : ''}`;
+    const targetConvo = conversations.find(c => c.id === targetConvoId);
+    const modelToUse = targetConvo?.modelId || settings.selectedModelId;
+    const personaIdToUse = targetConvo?.personaId || settings.activePersonaId;
+    const personaToUse = personas.find(p => p.id === personaIdToUse) || personas[0];
 
-      const systemMessage: ChatMessage = {
-        id: 'system',
-        role: 'system',
-        content: systemMessageContent,
-        timestamp: Date.now(),
+    // Cap persona memories to top 5 to prevent prompt bloat and uncontrolled token growth
+    const boundedMemories = personaToUse?.memories ? personaToUse.memories.slice(0, 5) : [];
+    const memorySection = boundedMemories.length > 0
+      ? `\n\nRelevant saved memories for this persona:\n${boundedMemories.map(m => `- ${m.content}`).join('\n')}`
+      : '';
+    const systemMessageContent = `System prompt:\n${personaToUse?.systemPrompt || ''}${memorySection}`;
+
+    const systemMessage: ChatMessage = {
+      id: 'system',
+      role: 'system',
+      content: systemMessageContent,
+      timestamp: Date.now(),
+    };
+
+    const cleanMessages = messagesContext.filter(m => m.role !== 'system' && !m.isError);
+    const assistantMessageId = uuidv4();
+    const initialAssistantMessage: ChatMessage = {
+      id: assistantMessageId,
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+    };
+
+    // Insert initial empty assistant message bubble into target conversation
+    setConversations(prev => prev.map(c => {
+      if (c.id !== targetConvoId) return c;
+      return {
+        ...c,
+        messages: [...cleanMessages, initialAssistantMessage],
+        lastUpdated: Date.now(),
       };
+    }));
 
-      const cleanMessages = messagesContext.filter(m => m.role !== 'system' && !m.isError);
+    let streamedContent = '';
 
-      const response = await ApiService.chatCompletion(
-        settings.selectedModelId,
+    try {
+      const streamResult = await ApiService.chatCompletionStream(
+        modelToUse,
         [systemMessage, ...cleanMessages],
         0.7,
         settings.ollamaHost,
-        controller.signal
+        controller.signal,
+        (_delta, accumulated) => {
+          streamedContent = accumulated;
+          setConversations(prev => prev.map(c => {
+            if (c.id !== targetConvoId) return c;
+            return {
+              ...c,
+              messages: c.messages.map(m => m.id === assistantMessageId ? { ...m, content: accumulated } : m),
+              lastUpdated: Date.now(),
+            };
+          }));
+
+          // Stream auto-scrolling that respects user manual scroll-up
+          if (!userScrolledUpRef.current && targetConvoId === activeConversationId) {
+            chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+          }
+        }
       );
 
-      const assistantMessage: ChatMessage = {
-        id: uuidv4(),
-        role: 'assistant',
-        content: response,
-        timestamp: Date.now(),
-      };
+      let finalContent = streamResult.content;
+      if (streamResult.aborted) {
+        finalContent = finalContent ? `${finalContent}\n\n*[Generation stopped by user]*` : '*[Generation stopped by user]*';
+      }
 
       setConversations(prev => prev.map(c => {
         if (c.id !== targetConvoId) return c;
-
+        const updatedMessages = c.messages.map(m => m.id === assistantMessageId ? { ...m, content: finalContent } : m);
         const nextConvo = {
           ...c,
-          messages: [...cleanMessages, assistantMessage],
+          messages: updatedMessages,
           lastUpdated: Date.now(),
         };
 
@@ -597,6 +647,15 @@ Type your query in the composer below or click the microphone to dictate.`,
       }));
     } catch (err: any) {
       if (err?.name === 'AbortError' || controller.signal.aborted) {
+        const finalContent = streamedContent ? `${streamedContent}\n\n*[Generation stopped by user]*` : '*[Generation stopped by user]*';
+        setConversations(prev => prev.map(c => {
+          if (c.id !== targetConvoId) return c;
+          return {
+            ...c,
+            messages: c.messages.map(m => m.id === assistantMessageId ? { ...m, content: finalContent } : m),
+            lastUpdated: Date.now(),
+          };
+        }));
         return;
       }
 
@@ -611,18 +670,22 @@ Type your query in the composer below or click the microphone to dictate.`,
 
       setConversations(prev => prev.map(c => {
         if (c.id !== targetConvoId) return c;
+        const baseMessages = streamedContent
+          ? c.messages.map(m => m.id === assistantMessageId ? { ...m, content: streamedContent } : m)
+          : c.messages.filter(m => m.id !== assistantMessageId);
         return {
           ...c,
-          messages: [...messagesContext.filter(m => !m.isError), errorMessage],
+          messages: [...baseMessages, errorMessage],
           lastUpdated: Date.now(),
         };
       }));
     } finally {
-      if (activeGeneratingConvoIdRef.current === targetConvoId) {
-        activeAbortControllerRef.current = null;
-        activeGeneratingConvoIdRef.current = null;
-        setIsLoading(false);
-      }
+      activeControllersRef.current.delete(targetConvoId);
+      setGeneratingConvoIds(prev => {
+        const next = new Set(prev);
+        next.delete(targetConvoId);
+        return next;
+      });
     }
   };
 
@@ -859,9 +922,9 @@ Type your query in the composer below or click the microphone to dictate.`,
   };
 
   const handleSummarizeMemory = async () => {
-    if (!activeConversation || activeConversation.messages.length < 2 || isLoading) return;
+    if (!activeConversation || activeConversation.messages.length < 2 || isLoading || isSummarizingMemory) return;
 
-    setIsLoading(true);
+    setIsSummarizingMemory(true);
     try {
       const summary = await ApiService.summarizeMemory(settings.selectedModelId, activeConversation.messages, settings.ollamaHost);
       const newMemory: PersonaMemory = {
@@ -882,7 +945,7 @@ Type your query in the composer below or click the microphone to dictate.`,
       console.error(err);
       showToast('Failed to summarize memory');
     } finally {
-      setIsLoading(false);
+      setIsSummarizingMemory(false);
     }
   };
 
@@ -933,13 +996,52 @@ Type your query in the composer below or click the microphone to dictate.`,
 
   const handlePersonaSelect = (personaId: string) => {
     const selectedPersona = personas.find(p => p.id === personaId);
+    const chosenModel = selectedPersona?.selectedModelId || settings.selectedModelId;
     setSettings(prev => {
-      const nextSettings = { ...prev, activePersonaId: personaId };
-      if (selectedPersona?.selectedModelId) {
-        nextSettings.selectedModelId = selectedPersona.selectedModelId;
-      }
+      const nextSettings = { ...prev, activePersonaId: personaId, selectedModelId: chosenModel };
+      StorageService.saveSettings(nextSettings);
       return nextSettings;
     });
+    if (activeConversationId) {
+      setConversations(prev => prev.map(c => c.id === activeConversationId ? {
+        ...c,
+        personaId,
+        modelId: chosenModel,
+        lastUpdated: Date.now()
+      } : c));
+    }
+  };
+
+  const handleModelSelect = (modelId: string) => {
+    setSettings(prev => {
+      const nextSettings = { ...prev, selectedModelId: modelId };
+      StorageService.saveSettings(nextSettings);
+      return nextSettings;
+    });
+    if (activeConversationId) {
+      setConversations(prev => prev.map(c => c.id === activeConversationId ? {
+        ...c,
+        modelId,
+        lastUpdated: Date.now()
+      } : c));
+    }
+  };
+
+  const handleSelectConversation = (convoId: string) => {
+    setActiveConversationId(convoId);
+    setIsSidebarOpen(false);
+    const target = conversations.find(c => c.id === convoId);
+    if (target) {
+      setSettings(prev => {
+        const next = {
+          ...prev,
+          selectedModelId: target.modelId || prev.selectedModelId,
+          activePersonaId: target.personaId || prev.activePersonaId,
+        };
+        StorageService.saveSettings(next);
+        return next;
+      });
+    }
   };
 
   const handleUpdatePersonaModel = (personaId: string, modelId: string) => {
@@ -1001,7 +1103,7 @@ Type your query in the composer below or click the microphone to dictate.`,
 
   // --- Derived State for Conversations & Search ---
   const activeConversation = conversations.find(c => c.id === activeConversationId);
-  const activePersona = personas.find(p => p.id === settings.activePersonaId) || personas[0];
+  const activePersona = personas.find(p => p.id === (activeConversation?.personaId || settings.activePersonaId)) || personas[0];
 
   const searchFilteredConversations = conversations.filter(c => {
     if (!searchQuery.trim()) return true;
@@ -1045,10 +1147,12 @@ Type your query in the composer below or click the microphone to dictate.`,
       }
     }
 
+    const isConvoGenerating = generatingConvoIds.has(convo.id);
+
     return (
       <div
         key={convo.id}
-        onClick={() => { setActiveConversationId(convo.id); setIsSidebarOpen(false); }}
+        onClick={() => handleSelectConversation(convo.id)}
         className={cn(
           "group relative p-2.5 rounded-xl cursor-pointer transition-all duration-200 border select-none",
           isActive
@@ -1092,6 +1196,9 @@ Type your query in the composer below or click the microphone to dictate.`,
               <div className="flex items-center gap-1.5 mb-1">
                 {convo.isPinned && (
                   <Pin size={11} className="text-[var(--accent-primary)] shrink-0 rotate-45" />
+                )}
+                {isConvoGenerating && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-primary)] animate-pulse shrink-0" title="Generating response..." />
                 )}
                 <p className={cn(
                   "text-xs truncate leading-snug tracking-tight",
@@ -1390,7 +1497,7 @@ Type your query in the composer below or click the microphone to dictate.`,
                     <div
                       key={model.id}
                       onClick={() => {
-                        setSettings(prev => ({ ...prev, selectedModelId: model.id }));
+                        handleModelSelect(model.id);
                         setIsModelSelectorOpen(false);
                       }}
                       className={cn(
@@ -1970,7 +2077,8 @@ Type your query in the composer below or click the microphone to dictate.`,
     </AnimatePresence>
   );
 
-  const selectedModel = models.find(m => m.id === settings.selectedModelId);
+  const activeModelId = activeConversation?.modelId || settings.selectedModelId;
+  const selectedModel = models.find(m => m.id === activeModelId);
   const isSelectedModelFree = parseFloat(selectedModel?.pricing?.prompt || '1') === 0;
 
   return (
@@ -2375,23 +2483,28 @@ Type your query in the composer below or click the microphone to dictate.`,
                   {isLoading && (
                     <div className="flex flex-col gap-2.5 pt-2">
                       <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-mono uppercase tracking-wider text-[var(--text-muted)] font-semibold">
-                          Void Assistant is thinking...
+                        <span className="text-[11px] font-mono uppercase tracking-wider text-[var(--text-muted)] font-semibold flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-primary)] animate-pulse" />
+                          {activeConversation?.messages[activeConversation.messages.length - 1]?.content
+                            ? 'Void Assistant is streaming...'
+                            : 'Void Assistant is thinking...'}
                         </span>
                         <button
                           type="button"
-                          onClick={handleStopGeneration}
+                          onClick={() => handleStopGeneration()}
                           className="px-3 py-1.5 rounded-xl text-xs font-mono border border-[var(--danger)]/40 bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)] text-[var(--danger)] flex items-center gap-1.5 transition-all cursor-pointer"
                         >
                           <Square size={11} fill="currentColor" />
                           <span>Stop</span>
                         </button>
                       </div>
-                      <div className="flex items-center gap-2 py-1.5">
-                        <div className="w-2 h-2 bg-[var(--accent-primary)] rounded-full animate-pulse" />
-                        <div className="w-2 h-2 bg-[var(--accent-primary)]/70 rounded-full animate-pulse delay-100" />
-                        <div className="w-2 h-2 bg-[var(--accent-primary)]/40 rounded-full animate-pulse delay-200" />
-                      </div>
+                      {!activeConversation?.messages[activeConversation.messages.length - 1]?.content && (
+                        <div className="flex items-center gap-2 py-1.5">
+                          <div className="w-2 h-2 bg-[var(--accent-primary)] rounded-full animate-pulse" />
+                          <div className="w-2 h-2 bg-[var(--accent-primary)]/70 rounded-full animate-pulse delay-100" />
+                          <div className="w-2 h-2 bg-[var(--accent-primary)]/40 rounded-full animate-pulse delay-200" />
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -2462,7 +2575,7 @@ Type your query in the composer below or click the microphone to dictate.`,
               {isLoading ? (
                 <button
                   type="button"
-                  onClick={handleStopGeneration}
+                  onClick={() => handleStopGeneration()}
                   aria-label="Stop generation"
                   title="Stop generating response"
                   className="px-3 py-2 rounded-xl bg-[var(--danger)]/15 border border-[var(--danger)]/30 text-[var(--danger)] hover:bg-[var(--danger)]/25 text-xs font-mono flex items-center gap-1.5 shrink-0 transition-all cursor-pointer mb-0.5"

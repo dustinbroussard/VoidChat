@@ -63,7 +63,7 @@ function normalizeConversation(raw: any, defaultIndex: number = 0): Conversation
   const personaId = typeof raw.personaId === 'string' && raw.personaId.trim() ? raw.personaId.trim() : 'default';
   const modelId = typeof raw.modelId === 'string' && raw.modelId.trim()
     ? raw.modelId.trim()
-    : 'google/gemini-2.0-flash-lite-preview-02-05:free';
+    : 'google/gemini-3.8-flash';
 
   const lastUpdated =
     typeof raw.lastUpdated === 'number' && !isNaN(raw.lastUpdated) && raw.lastUpdated > 0
@@ -271,7 +271,7 @@ export const StorageService = {
   getSettings(): AppSettings {
     const defaults: AppSettings = {
       theme: 'dark',
-      selectedModelId: 'google/gemini-2.0-flash-lite-preview-02-05:free',
+      selectedModelId: 'google/gemini-3.8-flash',
       activePersonaId: 'default',
       ollamaHost: 'http://localhost:11434',
       autoScroll: true,
@@ -309,7 +309,7 @@ export const StorageService = {
   createConversation(title: string, personaId: string, modelId: string): Conversation {
     const cleanTitle = (title && typeof title === 'string' && title.trim()) ? title.trim() : 'New Conversation';
     const cleanPersonaId = (personaId && typeof personaId === 'string') ? personaId : 'default';
-    const cleanModelId = (modelId && typeof modelId === 'string') ? modelId : 'google/gemini-2.0-flash-lite-preview-02-05:free';
+    const cleanModelId = (modelId && typeof modelId === 'string') ? modelId : 'google/gemini-3.8-flash';
 
     const newConvo: Conversation = {
       id: uuidv4(),

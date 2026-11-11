@@ -1,5 +1,5 @@
-const STATIC_CACHE = 'void-chat-static-v2';
-const RUNTIME_CACHE = 'void-chat-runtime-v2';
+const STATIC_CACHE = 'void-chat-static-v3';
+const RUNTIME_CACHE = 'void-chat-runtime-v3';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -66,7 +66,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (url.pathname.startsWith('/api/')) {
+  // Never intercept API routes or local development ports
+  if (url.pathname.startsWith('/api/') || url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
     return;
   }
 

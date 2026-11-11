@@ -1,32 +1,7 @@
 import { OpenRouterModel, ChatMessage } from '../types';
 
-async function parseApiError(response: Response, fallbackMessage: string): Promise<Error> {
-  let data: any = null;
-
-  try {
-    data = await response.json();
-  } catch {
-    try {
-      const text = await response.text();
-      if (text) {
-        return new Error(text);
-      }
-    } catch {
-      // Ignore response parsing failures and fall back to a generic message.
-    }
-  }
-
-  const message =
-    data?.details?.error?.message ||
-    data?.hint ||
-    data?.error ||
-    fallbackMessage;
-
-  return new Error(message);
-}
-
 function normalizeOllamaHost(host?: string): string {
-  if (!host || !host.trim()) return 'http://localhost:11434';
+  if (!host || !host.trim()) return 'http://127.0.0.1:11434';
   let cleaned = host.trim();
   if (!cleaned.startsWith('http://') && !cleaned.startsWith('https://')) {
     cleaned = `http://${cleaned}`;
@@ -34,20 +9,29 @@ function normalizeOllamaHost(host?: string): string {
   return cleaned.replace(/\/+$/, '');
 }
 
+export interface StreamResult {
+  content: string;
+  aborted?: boolean;
+}
+
 export const ApiService = {
+  /**
+   * Probes Ollama connectivity safely without triggering uncontrolled SSRF.
+   */
   async checkOllama(host?: string): Promise<boolean> {
     const targetHost = normalizeOllamaHost(host);
-    // 1. Try direct fetch with short timeout
+
+    // 1. Try direct fetch from browser (local development scenario)
     try {
       const res = await fetch(`${targetHost}/api/tags`, {
         signal: AbortSignal.timeout(1800),
       });
       if (res.ok) return true;
     } catch {
-      // Direct call failed (likely CORS, mixed-content, or offline)
+      // Direct call failed (likely CORS or mixed-content)
     }
 
-    // 2. Try server-side proxy probe
+    // 2. Try server-side loopback proxy probe
     try {
       const res = await fetch(`/api/ollama/status?host=${encodeURIComponent(targetHost)}`, {
         signal: AbortSignal.timeout(2500),
@@ -63,6 +47,9 @@ export const ApiService = {
     return false;
   },
 
+  /**
+   * Fetches installed Ollama models.
+   */
   async fetchOllamaModels(host?: string): Promise<OpenRouterModel[]> {
     const targetHost = normalizeOllamaHost(host);
     let modelsData: any = null;
@@ -76,10 +63,10 @@ export const ApiService = {
         modelsData = await res.json();
       }
     } catch {
-      // Direct fetch failed, fallback to server proxy
+      // Fall through to server proxy
     }
 
-    // 2. Try proxy if direct failed
+    // 2. Try server proxy if direct failed
     if (!modelsData) {
       try {
         const res = await fetch(`/api/ollama/tags?host=${encodeURIComponent(targetHost)}`, {
@@ -106,28 +93,29 @@ export const ApiService = {
     }));
   },
 
+  /**
+   * Fetches models from all configured providers.
+   */
   async fetchModels(ollamaHost?: string): Promise<OpenRouterModel[]> {
-    // 1. Fetch OpenRouter & Gemini models from server route
-    let openRouterModels: OpenRouterModel[] = [];
+    let cloudModels: OpenRouterModel[] = [];
     try {
       const response = await fetch('/api/models');
       if (response.ok) {
         const data = await response.json();
         if (Array.isArray(data?.data)) {
-          openRouterModels = data.data.map((m: any) => ({
+          cloudModels = data.data.map((m: any) => ({
             id: m.id,
             name: m.name,
-            pricing: m.pricing,
-            context_length: m.context_length,
+            pricing: m.pricing || { prompt: "0", completion: "0" },
+            context_length: m.context_length || 32768,
             source: m.source || (m.id.startsWith('google/') ? 'gemini' : 'openrouter'),
           }));
         }
       }
     } catch (err) {
-      console.warn('Failed to fetch standard models:', err);
+      console.warn('Failed to fetch cloud models:', err);
     }
 
-    // 2. Fetch local models from Ollama
     let ollamaModels: OpenRouterModel[] = [];
     try {
       ollamaModels = await this.fetchOllamaModels(ollamaHost);
@@ -135,14 +123,13 @@ export const ApiService = {
       console.warn('Failed to fetch Ollama models:', err);
     }
 
-    // 3. Merge models with Ollama models prepended for quick access
     const mergedMap = new Map<string, OpenRouterModel>();
 
     for (const model of ollamaModels) {
       mergedMap.set(model.id, model);
     }
 
-    for (const model of openRouterModels) {
+    for (const model of cloudModels) {
       if (!mergedMap.has(model.id)) {
         mergedMap.set(model.id, model);
       }
@@ -151,104 +138,100 @@ export const ApiService = {
     return Array.from(mergedMap.values());
   },
 
-  async chatCompletion(
+  /**
+   * Real-time incremental streaming chat completion using Server-Sent Events (SSE).
+   */
+  async chatCompletionStream(
     model: string,
     messages: ChatMessage[],
     temperature: number = 0.7,
     ollamaHost?: string,
-    signal?: AbortSignal
-  ): Promise<string> {
+    signal?: AbortSignal,
+    onChunk?: (delta: string, accumulated: string) => void
+  ): Promise<StreamResult> {
     if (signal?.aborted) {
-      throw new DOMException('Generation stopped by user', 'AbortError');
+      return { content: '', aborted: true };
     }
 
     const targetHost = normalizeOllamaHost(ollamaHost);
+    const cleanMessages = messages
+      .filter(m => !m.isError)
+      .map(m => ({ role: m.role, content: m.content }));
 
-    // If this is an Ollama model, attempt direct local call first, then server proxy
+    let accumulated = '';
+
+    // Direct browser fetch for Ollama if running on loopback
     if (model.startsWith('ollama/')) {
       const rawModel = model.replace(/^ollama\//, '');
-      const formattedMessages = messages.map(m => ({ role: m.role, content: m.content }));
+      let directStreamSuccessful = false;
 
-      // 1. Direct browser fetch to Ollama (if accessible directly)
       try {
-        const res = await fetch(`${targetHost}/api/chat`, {
+        const directRes = await fetch(`${targetHost}/api/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal,
           body: JSON.stringify({
             model: rawModel,
-            messages: formattedMessages,
-            stream: false,
+            messages: cleanMessages,
+            stream: true,
             options: { temperature },
           }),
         });
 
-        if (res.ok) {
-          const data = await res.json();
-          if (data?.message?.content) {
-            return data.message.content;
+        if (directRes.ok && directRes.body) {
+          directStreamSuccessful = true;
+          const reader = directRes.body.getReader();
+          const decoder = new TextDecoder();
+          let lineBuffer = '';
+
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              lineBuffer += decoder.decode(value, { stream: true });
+              const lines = lineBuffer.split('\n');
+              lineBuffer = lines.pop() || '';
+
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+                try {
+                  const parsed = JSON.parse(trimmed);
+                  const token = parsed.message?.content || '';
+                  if (token) {
+                    accumulated += token;
+                    onChunk?.(token, accumulated);
+                  }
+                  if (parsed.done) {
+                    return { content: accumulated };
+                  }
+                } catch {
+                  // Partial JSON
+                }
+              }
+            }
+            return { content: accumulated };
+          } catch (err: any) {
+            if (err?.name === 'AbortError' || signal?.aborted) {
+              return { content: accumulated, aborted: true };
+            }
+            throw err;
           }
         }
-      } catch (err: any) {
-        if (err?.name === 'AbortError' || signal?.aborted) {
-          throw new DOMException('Generation stopped by user', 'AbortError');
+      } catch (directErr: any) {
+        if (directErr?.name === 'AbortError' || signal?.aborted) {
+          return { content: accumulated, aborted: true };
         }
-        // Direct call failed (CORS/offline/mixed-content), fall back to server proxy
+        // Direct fetch failed (CORS/offline); fall through to server proxy
       }
-
-      if (signal?.aborted) {
-        throw new DOMException('Generation stopped by user', 'AbortError');
-      }
-
-      // 2. Server proxy fallback
-      let response: Response;
-      try {
-        response = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal,
-          body: JSON.stringify({
-            model,
-            messages: formattedMessages,
-            temperature,
-            ollamaHost: targetHost,
-          }),
-        });
-      } catch (fetchErr: any) {
-        if (fetchErr?.name === 'AbortError' || signal?.aborted) {
-          throw new DOMException('Generation stopped by user', 'AbortError');
-        }
-        throw new Error(`Could not connect to Ollama service at ${targetHost}. Ensure Ollama is running ('ollama serve').`);
-      }
-
-      let data: any = null;
-      try {
-        data = await response.json();
-      } catch {
-        // Non-JSON response
-      }
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error(`Ollama model "${rawModel}" was not found. Run 'ollama run ${rawModel}' first.`);
-        }
-        if (response.status === 504 || response.status === 408) {
-          throw new Error('Ollama request timed out. The model may be loading or under heavy load.');
-        }
-        const errDetail = data?.error || data?.details || 'Ollama generation failed';
-        throw new Error(String(errDetail));
-      }
-
-      if (data?.choices?.[0]?.message?.content) {
-        return data.choices[0].message.content;
-      }
-      if (data?.message?.content) {
-        return data.message.content;
-      }
-      throw new Error('Invalid response received from local Ollama model');
     }
 
-    // Standard OpenRouter / Gemini flow
+    if (signal?.aborted) {
+      return { content: accumulated, aborted: true };
+    }
+
+    // Server-side SSE Stream
     let response: Response;
     try {
       response = await fetch('/api/chat', {
@@ -257,57 +240,112 @@ export const ApiService = {
         signal,
         body: JSON.stringify({
           model,
-          messages: messages.map(m => ({ role: m.role, content: m.content })),
+          messages: cleanMessages,
           temperature,
+          stream: true,
+          ollamaHost: targetHost,
         }),
       });
-    } catch (err: any) {
-      if (err?.name === 'AbortError' || signal?.aborted) {
-        throw new DOMException('Generation stopped by user', 'AbortError');
+    } catch (fetchErr: any) {
+      if (fetchErr?.name === 'AbortError' || signal?.aborted) {
+        return { content: accumulated, aborted: true };
       }
-      throw new Error('Network connection error. Please verify your internet connection.');
-    }
-
-    let data: any = null;
-    try {
-      data = await response.json();
-    } catch {
-      // Non-JSON response
+      throw new Error(`Network connection error: ${fetchErr?.message || 'Could not reach server endpoint.'}`);
     }
 
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        throw new Error('Authentication failure. Please check your API key configuration.');
-      }
-      if (response.status === 429) {
-        throw new Error('Rate limit reached. Please wait a brief moment before retrying.');
-      }
-      if (response.status === 503 || response.status === 502) {
-        throw new Error('The selected model is temporarily overloaded or unavailable. Please retry or try another model.');
-      }
-      if (response.status === 504) {
-        throw new Error('The request timed out waiting for the model. Please retry.');
-      }
-      const message = data?.details?.error?.message || data?.error || 'Chat completion request failed';
-      throw new Error(String(message));
+      const errData = await response.json().catch(() => ({}));
+      const errMsg = errData?.error || errData?.details || `Request failed with status ${response.status}`;
+      throw new Error(String(errMsg));
     }
 
-    if (!data?.choices || !data.choices[0] || !data.choices[0].message) {
-      throw new Error('Invalid response received from AI model');
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('Streaming response body is not readable.');
     }
 
-    return data.choices[0].message.content;
+    const decoder = new TextDecoder();
+    let lineBuffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        lineBuffer += decoder.decode(value, { stream: true });
+        const lines = lineBuffer.split('\n');
+        lineBuffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data:')) continue;
+
+          const jsonPayload = trimmed.slice(5).trim();
+          if (jsonPayload === '[DONE]') {
+            return { content: accumulated };
+          }
+
+          try {
+            const event = JSON.parse(jsonPayload);
+            if (event.type === 'chunk' && typeof event.text === 'string') {
+              accumulated += event.text;
+              onChunk?.(event.text, accumulated);
+            } else if (event.type === 'error') {
+              throw new Error(event.error || 'Upstream provider streaming error.');
+            } else if (event.type === 'done') {
+              return { content: accumulated };
+            }
+          } catch (jsonErr: any) {
+            if (jsonErr?.message?.includes('Upstream provider')) {
+              throw jsonErr;
+            }
+            // Ignore incomplete JSON chunks
+          }
+        }
+      }
+      return { content: accumulated };
+    } catch (streamErr: any) {
+      if (streamErr?.name === 'AbortError' || signal?.aborted) {
+        return { content: accumulated, aborted: true };
+      }
+      throw streamErr;
+    } finally {
+      reader.cancel().catch(() => undefined);
+    }
   },
 
+  /**
+   * Non-streaming fallback for summarization and utility tasks.
+   */
+  async chatCompletion(
+    model: string,
+    messages: ChatMessage[],
+    temperature: number = 0.7,
+    ollamaHost?: string,
+    signal?: AbortSignal
+  ): Promise<string> {
+    const result = await this.chatCompletionStream(
+      model,
+      messages,
+      temperature,
+      ollamaHost,
+      signal
+    );
+    return result.content;
+  },
+
+  /**
+   * Summarizes reusable context for persona memory.
+   */
   async summarizeMemory(
     model: string,
     messages: ChatMessage[],
     ollamaHost?: string
   ): Promise<string> {
-    const summaryPrompt = "Summarize the key reusable context from this conversation. Focus on durable facts, user preferences, project decisions, terminology, constraints, and implementation details. Do not include small talk. Do not include temporary mood unless it is relevant to the project. Write concise bullet points. This memory will be saved only for the currently active persona.";
+    const summaryPrompt = "Summarize the key reusable context from this conversation. Focus on durable facts, user preferences, project decisions, terminology, constraints, and implementation details. Do not include small talk. Limit to at most 4 concise bullet points. This memory will be saved for the currently active persona.";
 
     const summaryMessages: ChatMessage[] = [
-      ...messages,
+      ...messages.slice(-10), // Limit to last 10 messages to avoid token blow-up
       { id: 'summary-prompt', role: 'user', content: summaryPrompt, timestamp: Date.now() }
     ];
 
